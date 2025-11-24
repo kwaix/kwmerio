@@ -3,9 +3,9 @@ const ctx = canvas.getContext('2d');
 
 // --- Game Constants ---
 const TARGET_FPS = 60;
-const TIME_STEP = 1000 / TARGET_FPS; // ~16.6ms per frame intended
+const TIME_STEP = 1000 / TARGET_FPS; 
 
-// Physics constants tuned for 60 FPS reference
+// Physics constants
 const GRAVITY = 0.6;
 const JUMP_FORCE = -11; 
 const BASE_SPEED = 4;
@@ -25,24 +25,16 @@ playerImage.onload = () => {
     assetsLoaded = true;
 };
 
-// --- Firebase Setup Placeholder ---
-// TODO: User must replace this with their own Firebase Config
-const firebaseConfig = {
-    // apiKey: "YOUR_API_KEY",
-    // authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    // projectId: "YOUR_PROJECT_ID",
-    // storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    // messagingSenderId: "YOUR_SENDER_ID",
-    // appId: "YOUR_APP_ID"
-};
+// --- Supabase Setup ---
+const SUPABASE_URL = 'https://qqelpmjcursojhxsqrfm.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxZWxwbWpjdXJzb2poeHNxcmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5NDk2NDgsImV4cCI6MjA3OTUyNTY0OH0.sLHv9TDLpR-7B1gJiT5fnEtZ_PSwB9NEL77H2R6SXkI';
 
-let db = null;
-// Check if Firebase is loaded and config is present
-if (typeof firebase !== 'undefined' && firebaseConfig.apiKey) {
-    firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
+let supabase = null;
+// Check for global supabase object from CDN
+if (typeof window.supabase !== 'undefined' && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } else {
-    console.log("Firebase not initialized. Using LocalStorage.");
+    console.log("Supabase not initialized (or config missing). Using LocalStorage.");
 }
 
 // --- Game State ---
@@ -50,8 +42,8 @@ let gameState = 'playing';
 let score = 0;
 let phase = 1;
 let cameraX = 0;
-let frameCount = 0; // Still tracked for animation timing
-let timeAccumulator = 0; // For survival score
+let frameCount = 0; 
+let timeAccumulator = 0; 
 
 // Player State
 let player = {
@@ -218,7 +210,15 @@ function addDecorations(px, py, pw) {
 }
 
 function spawnEnemy(px, py, pw) {
-    const enemyTypeIdx = Math.floor(Math.random() * phase) + 1; 
+    // Explicit Phase Spawning
+    // Accumulate enemies: Phase 1 has Type 1. Phase 2 has Type 1, 2.
+    const availableTypes = [];
+    for (let i = 1; i <= phase; i++) {
+        availableTypes.push(i);
+    }
+    
+    // Pick one random type from available
+    const enemyTypeIdx = availableTypes[Math.floor(Math.random() * availableTypes.length)];
     
     let type = 'turtle';
     let w = 40, h = 40;
@@ -266,14 +266,13 @@ function applyItemEffect(type) {
     if (type === 'yellow_mushroom') { 
         player.sizeMultiplier = 2.0;
         player.width = BASE_PLAYER_WIDTH * 2;
-        player.height = BASE_PLAYER_HEIGHT * 2;
-        player.y -= BASE_PLAYER_HEIGHT; 
-        text = "BIG!";
+        player.height = BASE_PLAYER_HEIGHT; 
+        text = "WIDE!";
     } else if (type === 'blue_mushroom') { 
         player.sizeMultiplier = 0.5;
         player.width = BASE_PLAYER_WIDTH * 0.5;
-        player.height = BASE_PLAYER_HEIGHT * 0.5;
-        text = "Small...";
+        player.height = BASE_PLAYER_HEIGHT;
+        text = "THIN...";
     } else if (type === 'red_mushroom') { 
         player.speedMultiplier = 1.5;
         text = "SPEED UP!";
@@ -297,14 +296,12 @@ function performJump() {
 }
 
 // --- Main Update Loop with Delta Time ---
-// dt is in 'units of 60fps frame' (e.g. 1.0 = 16.6ms, 2.0 = 33ms)
 function update(dt) {
     if (gameState !== 'playing') return;
 
     frameCount++;
     
-    // Time based score: +1 every 1 second (1000ms)
-    timeAccumulator += dt * 16.6; // dt is scale, 16.6 is ms per frame
+    timeAccumulator += dt * 16.6; 
     if (timeAccumulator >= 1000) {
         score += 1;
         timeAccumulator -= 1000;
@@ -313,40 +310,20 @@ function update(dt) {
 
     updateScoreUI();
 
-    // Movement scaled by dt
     let speed = currentSpeed * player.speedMultiplier;
-    player.dx = speed * dt; // Scaled movement
+    player.dx = speed * dt; 
     
     player.facingRight = true;
 
-    // Gravity scaled by dt
-    // v = v0 + a*dt
     player.dy += GRAVITY * dt;
     if (player.dy > 15) player.dy = 15;
 
-    // Position scaled by dt (velocity is already pixels/frame)
-    // but we updated velocity with dt, so we add velocity * dt?
-    // Standard Euler integration:
-    // pos += vel * dt
-    // If vel is in 'pixels per frame', then pos += vel * dt works if dt=1.
-    // Correct.
-    
-    player.x += player.dx; // player.dx already has dt applied? No, above: speed * dt.
-    // Actually, if I scale dx by dt, then adding it to x is correct.
-    // What about dy? dy is a velocity state.
-    // dy should change by gravity * dt.
-    // Then y should change by dy * dt.
-    // CAREFUL: if dy is "pixels per frame @ 60fps", then:
-    // Next dy = dy + GRAVITY * dt.
-    // Next y = y + (dy * dt).
-    // This is the correct way for variable time step.
+    player.x += player.dx; 
     
     player.y += player.dy * dt;
 
-    // Camera
     cameraX = player.x - VIEWPORT_WIDTH * 0.3;
     
-    // Clouds (Visuals)
     if (Math.random() < 0.01 * dt) spawnCloud(cameraX + VIEWPORT_WIDTH + 50);
     for (let i = clouds.length - 1; i >= 0; i--) {
         let c = clouds[i];
@@ -354,16 +331,12 @@ function update(dt) {
         if (c.x + c.width < cameraX - 100) clouds.splice(i, 1);
     }
 
-    // Ground Check
     player.grounded = false;
 
-    // Collision Logic 
-    // (Note: Collision at high speeds/dt might require swept collision, but for simple game, overlapping check is ok unless dt is huge)
-    
     // Platforms
     for (let p of platforms) {
         if (checkCollision(player, p)) {
-            const prevY = player.y - (player.dy * dt); // Backtrack using dt
+            const prevY = player.y - (player.dy * dt); 
             if (prevY + player.height <= p.y + (player.dy > 0 ? player.dy * dt : 0) + 5) {
                 if (player.dy >= 0) {
                     player.grounded = true;
@@ -427,7 +400,7 @@ function update(dt) {
     for (let i = enemies.length - 1; i >= 0; i--) {
         let e = enemies[i];
         
-        e.x += e.dx * dt; // Scaled movement
+        e.x += e.dx * dt; 
         if (e.x < e.patrolStart || e.x > e.patrolEnd) e.dx *= -1;
 
         if (checkCollision(player, e)) {
@@ -460,7 +433,7 @@ function update(dt) {
         }
     }
 
-    // Items
+    // Items (Ground spawned)
     for (let i = items.length - 1; i >= 0; i--) {
         let it = items[i];
         it.dy += GRAVITY * dt;
@@ -485,7 +458,6 @@ function update(dt) {
     if (player.y > VIEWPORT_HEIGHT + 100) triggerGameOver();
     if (player.x < cameraX - 50) triggerGameOver();
 
-    // Auto-generate world
     const renderDistance = cameraX + VIEWPORT_WIDTH + 200;
     while (nextChunkX < renderDistance) {
         nextChunkX = createChunk(nextChunkX);
@@ -544,56 +516,61 @@ function draw() {
     ctx.fillStyle = 'red';
     for (let h of hazards) {
         ctx.beginPath();
-        ctx.moveTo(h.x, h.y + h.height);
-        ctx.moveTo(h.x + h.width/2, h.y); 
-        ctx.lineTo(h.x + h.width, h.y + h.height);
-        ctx.lineTo(h.x, h.y + h.height);
+        const overflow = 2;
+        ctx.moveTo(h.x - overflow, h.y + h.height + overflow);
+        ctx.moveTo(h.x + h.width/2, h.y - overflow); 
+        ctx.lineTo(h.x + h.width + overflow, h.y + h.height + overflow);
+        ctx.lineTo(h.x - overflow, h.y + h.height + overflow);
         ctx.fill();
     }
 
     // Enemies
     for (let e of enemies) {
         ctx.save();
+        // Move pivot to center of enemy
+        ctx.translate(e.x + e.width/2, e.y + e.height/2);
         if (e.dx > 0) { 
-            ctx.translate(e.x + e.width, e.y);
-            ctx.scale(-1, 1);
-            ctx.translate(-e.width, 0); 
+            ctx.scale(-1, 1); // Flip
         }
         
+        // Draw relative to center (-w/2, -h/2)
         if (e.type === 'larva') {
             let scale = 1 + Math.sin(frameCount * 0.2 + e.animOffset) * 0.2; 
             ctx.fillStyle = '#7FFF00'; 
             for(let k=0; k<3; k++) {
-                let segX = e.x + 10 + k*10 * scale; 
+                let segOffset = (k - 1) * 10 * scale; // Center segments
                 ctx.beginPath();
-                ctx.arc(segX, e.y + 10, 10, 0, Math.PI*2);
+                ctx.arc(segOffset, 0, 10, 0, Math.PI*2); // y=0 because translated to center
                 ctx.fill();
             }
         } else if (e.type === 'turtle') {
             ctx.fillStyle = 'green';
             ctx.beginPath();
-            ctx.arc(e.x + e.width/2, e.y + e.height/2, e.width/2, Math.PI, 0);
+            ctx.arc(0, 0, e.width/2, 0, Math.PI*2);
             ctx.fill();
             ctx.fillStyle = '#90EE90'; 
-            ctx.fillRect(e.x-5, e.y+15, 10, 10);
+            ctx.fillRect(-e.width/2 - 5, 0, 10, 10); // Head
         } else if (e.type === 'slime') {
-            ctx.fillStyle = 'rgba(0, 0, 255, 0.6)';
+            ctx.fillStyle = '#4169E1'; 
             ctx.beginPath();
-            ctx.moveTo(e.x, e.y + e.height);
-            ctx.quadraticCurveTo(e.x + e.width/2, e.y - 10, e.x + e.width, e.y + e.height);
+            ctx.moveTo(-e.width/2, e.height/2); // Bottom left
+            ctx.quadraticCurveTo(0, -e.height/2 - 10, e.width/2, e.height/2); // Curve to top center then bottom right
             ctx.fill();
         } else if (e.type === 'mouse') {
             ctx.fillStyle = 'gray';
-            ctx.fillRect(e.x, e.y+5, e.width, e.height-5);
+            ctx.fillRect(-e.width/2, -e.height/2 + 5, e.width, e.height-5);
             ctx.fillStyle = 'pink'; 
-            ctx.beginPath(); ctx.arc(e.x+5, e.y+5, 5, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(-e.width/2 + 5, -e.height/2 + 5, 5, 0, Math.PI*2); ctx.fill();
         } else if (e.type === 'shark') {
             ctx.fillStyle = 'darkblue';
             ctx.beginPath();
-            ctx.moveTo(e.x + e.width, e.y + e.height/2);
-            ctx.lineTo(e.x, e.y + e.height);
-            ctx.lineTo(e.x + 20, e.y); 
+            ctx.moveTo(e.width/2, 0);
+            ctx.lineTo(-e.width/2, e.height/2);
+            ctx.lineTo(-e.width/2 + 20, -e.height/2); 
             ctx.fill();
+        } else {
+            ctx.fillStyle = 'magenta';
+            ctx.fillRect(-e.width/2, -e.height/2, e.width, e.height);
         }
         ctx.restore();
     }
@@ -664,26 +641,23 @@ function hideGameOverScreen() {
 
 const LEADERBOARD_KEY = 'kwmerio_scores';
 
-// Firestore Integration
-function saveScore() {
+// Supabase Integration
+async function saveScore() {
     const nameInput = document.getElementById('player-name');
     const name = nameInput.value.trim() || 'Anonymous';
     
-    if (db) {
-        // Use Firestore
-        db.collection('scores').add({
-            name: name,
-            score: score,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        }).then(() => {
-            loadLeaderboard();
-        }).catch((error) => {
-            console.error("Error saving score:", error);
-            // Fallback to local
+    if (supabase) {
+        const { error } = await supabase
+            .from('leaderboard')
+            .insert([{ name: name, score: score }]);
+            
+        if (error) {
+            console.error("Supabase Error:", error);
             saveScoreLocal(name);
-        });
+        } else {
+            loadLeaderboard();
+        }
     } else {
-        // Use Local
         saveScoreLocal(name);
     }
     document.getElementById('save-score-btn').disabled = true;
@@ -698,30 +672,28 @@ function saveScoreLocal(name) {
     loadLeaderboard();
 }
 
-function loadLeaderboard() {
+async function loadLeaderboard() {
     const list = document.getElementById('leaderboard-list');
     list.innerHTML = 'Loading...';
     
-    if (db) {
-        // Load from Firestore (Top 10)
-        db.collection('scores')
-            .orderBy('score', 'desc')
-            .limit(10)
-            .get()
-            .then((querySnapshot) => {
-                list.innerHTML = '';
-                let rank = 1;
-                querySnapshot.forEach((doc) => {
-                    const s = doc.data();
-                    const li = document.createElement('li');
-                    li.innerHTML = `<span>#${rank++} ${s.name}</span> <span>${s.score}</span>`;
-                    list.appendChild(li);
-                });
-            })
-            .catch((error) => {
-                console.error("Error loading leaderboard:", error);
-                loadLeaderboardLocal();
+    if (supabase) {
+        const { data, error } = await supabase
+            .from('leaderboard')
+            .select('name, score')
+            .order('score', { ascending: false })
+            .limit(10);
+            
+        if (error) {
+            console.error("Supabase Error:", error);
+            loadLeaderboardLocal();
+        } else {
+            list.innerHTML = '';
+            data.forEach((s, index) => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>#${index+1} ${s.name}</span> <span>${s.score}</span>`;
+                list.appendChild(li);
             });
+        }
     } else {
         loadLeaderboardLocal();
     }
@@ -774,13 +746,9 @@ function loop(timestamp) {
     const deltaTime = timestamp - lastTime;
     lastTime = timestamp;
 
-    // Scale dt to target FPS (60)
-    // If running at 60fps, deltaTime is 16.6ms. scale = 1.
-    // If running at 120fps, deltaTime is 8.3ms. scale = 0.5.
-    // If running at 30fps, deltaTime is 33.3ms. scale = 2.
     const dt = deltaTime / (1000 / TARGET_FPS);
 
-    update(dt); // Update with scaled time
+    update(dt); 
     draw();
     requestAnimationFrame(loop);
 }
