@@ -2,6 +2,10 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 // --- Game Constants ---
+const TARGET_FPS = 60;
+const TIME_STEP = 1000 / TARGET_FPS; // ~16.6ms per frame intended
+
+// Physics constants tuned for 60 FPS reference
 const GRAVITY = 0.6;
 const JUMP_FORCE = -11; 
 const BASE_SPEED = 4;
@@ -21,12 +25,33 @@ playerImage.onload = () => {
     assetsLoaded = true;
 };
 
+// --- Firebase Setup Placeholder ---
+// TODO: User must replace this with their own Firebase Config
+const firebaseConfig = {
+    // apiKey: "YOUR_API_KEY",
+    // authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    // projectId: "YOUR_PROJECT_ID",
+    // storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    // messagingSenderId: "YOUR_SENDER_ID",
+    // appId: "YOUR_APP_ID"
+};
+
+let db = null;
+// Check if Firebase is loaded and config is present
+if (typeof firebase !== 'undefined' && firebaseConfig.apiKey) {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+} else {
+    console.log("Firebase not initialized. Using LocalStorage.");
+}
+
 // --- Game State ---
 let gameState = 'playing'; 
 let score = 0;
 let phase = 1;
 let cameraX = 0;
-let frameCount = 0;
+let frameCount = 0; // Still tracked for animation timing
+let timeAccumulator = 0; // For survival score
 
 // Player State
 let player = {
@@ -53,8 +78,9 @@ let hazards = [];
 let items = [];
 let particles = []; 
 let coins = []; 
+let clouds = []; 
 
-// Inputs (Only Jump now)
+// Inputs
 const keys = {
     up: false
 };
@@ -73,9 +99,9 @@ function initGame() {
     phase = 1;
     cameraX = 0;
     frameCount = 0;
+    timeAccumulator = 0;
     nextChunkX = 500;
     
-    // Reset Player
     player.x = 100;
     player.y = 300;
     player.dx = 0;
@@ -89,7 +115,6 @@ function initGame() {
     player.canDoubleJump = false;
     player.jumpCount = 0;
 
-    // Reset Difficulty
     currentSpeed = BASE_SPEED;
     obstacleFreq = 0.1;
     pitFreq = 0.1;
@@ -97,7 +122,6 @@ function initGame() {
     updateScoreUI();
     hideGameOverScreen();
 
-    // Initial Platform
     platforms = [];
     platforms.push({ x: -100, y: 550, width: 600, height: 90, type: 'ground' });
 
@@ -107,6 +131,20 @@ function initGame() {
     items = [];
     particles = [];
     coins = [];
+    clouds = [];
+    
+    for(let i=0; i<5; i++) {
+        spawnCloud(Math.random() * VIEWPORT_WIDTH);
+    }
+}
+
+function spawnCloud(x) {
+    clouds.push({
+        x: x,
+        y: Math.random() * (VIEWPORT_HEIGHT / 2),
+        width: 60 + Math.random() * 80,
+        speed: 0.5 + Math.random() * 0.5
+    });
 }
 
 // --- Level Generation ---
@@ -117,7 +155,6 @@ function updateDifficulty() {
     
     if (newPhase > phase) {
         phase = newPhase;
-        // Speed increases by 10% per phase
         currentSpeed = BASE_SPEED * (1 + (phase - 1) * 0.1); 
         obstacleFreq = 0.1 + (phase - 1) * 0.1;
         pitFreq = 0.1 + (phase - 1) * 0.05;
@@ -127,7 +164,7 @@ function updateDifficulty() {
 function createChunk(startX) {
     let gap = 0;
     if (Math.random() < pitFreq && startX > 800) {
-        gap = 80 + Math.random() * 60; // Slightly larger gap for auto-run challenge
+        gap = 80 + Math.random() * 60; 
     }
 
     const width = 300 + Math.random() * 300; 
@@ -183,11 +220,11 @@ function addDecorations(px, py, pw) {
 function spawnEnemy(px, py, pw) {
     const enemyTypeIdx = Math.floor(Math.random() * phase) + 1; 
     
-    let type = 'larva';
+    let type = 'turtle';
     let w = 40, h = 40;
     
-    if (enemyTypeIdx === 1) { type = 'larva'; w = 30; h = 20; }
-    else if (enemyTypeIdx === 2) { type = 'turtle'; w = 40; h = 30; }
+    if (enemyTypeIdx === 1) { type = 'turtle'; w = 40; h = 30; }
+    else if (enemyTypeIdx === 2) { type = 'larva'; w = 30; h = 20; }
     else if (enemyTypeIdx === 3) { type = 'slime'; w = 30; h = 30; }
     else if (enemyTypeIdx === 4) { type = 'mouse'; w = 25; h = 20; }
     else if (enemyTypeIdx >= 5) { type = 'shark'; w = 60; h = 40; }
@@ -198,10 +235,10 @@ function spawnEnemy(px, py, pw) {
         width: w,
         height: h,
         type: type,
-        // Enemies move left towards player
         dx: -1.5 * (1 + (phase * 0.1)), 
         patrolStart: px,
-        patrolEnd: px + pw
+        patrolEnd: px + pw,
+        animOffset: Math.random() * 10
     });
 }
 
@@ -216,40 +253,36 @@ function checkCollision(objA, objB) {
     );
 }
 
-function spawnItem(x, y) {
+function getRandomItemType() {
     const r = Math.random();
-    let type = 'yellow_mushroom';
-    if (r < 0.25) type = 'blue_mushroom';
-    else if (r < 0.5) type = 'red_mushroom';
-    else if (r < 0.75) type = 'rainbow_mushroom'; 
-
-    items.push({
-        x: x,
-        y: y,
-        width: 30,
-        height: 30,
-        type: type,
-        dy: -5, 
-        dx: Math.random() > 0.5 ? 2 : -2,
-        grounded: false
-    });
+    if (r < 0.25) return 'yellow_mushroom';
+    else if (r < 0.5) return 'blue_mushroom';
+    else if (r < 0.75) return 'red_mushroom';
+    else return 'rainbow_mushroom';
 }
 
 function applyItemEffect(type) {
+    let text = "";
     if (type === 'yellow_mushroom') { 
         player.sizeMultiplier = 2.0;
         player.width = BASE_PLAYER_WIDTH * 2;
         player.height = BASE_PLAYER_HEIGHT * 2;
         player.y -= BASE_PLAYER_HEIGHT; 
+        text = "BIG!";
     } else if (type === 'blue_mushroom') { 
         player.sizeMultiplier = 0.5;
         player.width = BASE_PLAYER_WIDTH * 0.5;
         player.height = BASE_PLAYER_HEIGHT * 0.5;
+        text = "Small...";
     } else if (type === 'red_mushroom') { 
         player.speedMultiplier = 1.5;
+        text = "SPEED UP!";
     } else if (type === 'rainbow_mushroom') {
         player.canDoubleJump = true;
+        text = "Double Jump!";
     }
+    
+    coins.push({x: player.x, y: player.y - 20, text: text, timer: 60, color: 'white'});
 }
 
 function performJump() {
@@ -263,45 +296,75 @@ function performJump() {
     }
 }
 
-function update() {
+// --- Main Update Loop with Delta Time ---
+// dt is in 'units of 60fps frame' (e.g. 1.0 = 16.6ms, 2.0 = 33ms)
+function update(dt) {
     if (gameState !== 'playing') return;
 
     frameCount++;
     
-    if (frameCount % 60 === 0) {
+    // Time based score: +1 every 1 second (1000ms)
+    timeAccumulator += dt * 16.6; // dt is scale, 16.6 is ms per frame
+    if (timeAccumulator >= 1000) {
         score += 1;
+        timeAccumulator -= 1000;
         updateDifficulty();
     }
 
     updateScoreUI();
 
-    // AUTO RUN: Always move right
+    // Movement scaled by dt
     let speed = currentSpeed * player.speedMultiplier;
-    player.dx = speed;
+    player.dx = speed * dt; // Scaled movement
+    
     player.facingRight = true;
 
-    // Gravity
-    player.dy += GRAVITY;
+    // Gravity scaled by dt
+    // v = v0 + a*dt
+    player.dy += GRAVITY * dt;
     if (player.dy > 15) player.dy = 15;
 
-    player.x += player.dx;
-    player.y += player.dy;
+    // Position scaled by dt (velocity is already pixels/frame)
+    // but we updated velocity with dt, so we add velocity * dt?
+    // Standard Euler integration:
+    // pos += vel * dt
+    // If vel is in 'pixels per frame', then pos += vel * dt works if dt=1.
+    // Correct.
+    
+    player.x += player.dx; // player.dx already has dt applied? No, above: speed * dt.
+    // Actually, if I scale dx by dt, then adding it to x is correct.
+    // What about dy? dy is a velocity state.
+    // dy should change by gravity * dt.
+    // Then y should change by dy * dt.
+    // CAREFUL: if dy is "pixels per frame @ 60fps", then:
+    // Next dy = dy + GRAVITY * dt.
+    // Next y = y + (dy * dt).
+    // This is the correct way for variable time step.
+    
+    player.y += player.dy * dt;
 
-    // Camera: Follow player with offset
-    // Player stays at 30% of screen width
+    // Camera
     cameraX = player.x - VIEWPORT_WIDTH * 0.3;
     
-    // Death if falls behind? No, camera follows.
-    // Death if hits wall? Not possible in infinite runner usually.
+    // Clouds (Visuals)
+    if (Math.random() < 0.01 * dt) spawnCloud(cameraX + VIEWPORT_WIDTH + 50);
+    for (let i = clouds.length - 1; i >= 0; i--) {
+        let c = clouds[i];
+        c.x += (c.speed * 0.2) * dt; 
+        if (c.x + c.width < cameraX - 100) clouds.splice(i, 1);
+    }
 
     // Ground Check
     player.grounded = false;
 
-    // 1. Platforms Collision
+    // Collision Logic 
+    // (Note: Collision at high speeds/dt might require swept collision, but for simple game, overlapping check is ok unless dt is huge)
+    
+    // Platforms
     for (let p of platforms) {
         if (checkCollision(player, p)) {
-            const prevY = player.y - player.dy;
-            if (prevY + player.height <= p.y + (player.dy > 0 ? player.dy : 0) + 5) {
+            const prevY = player.y - (player.dy * dt); // Backtrack using dt
+            if (prevY + player.height <= p.y + (player.dy > 0 ? player.dy * dt : 0) + 5) {
                 if (player.dy >= 0) {
                     player.grounded = true;
                     player.dy = 0;
@@ -313,25 +376,20 @@ function update() {
                 player.dy = 0;
                 player.y = p.y + p.height;
             } else {
-                 // Side collision in Auto Run usually means death or stop
-                 // If we hit a wall, game over?
-                 // Or just stop and let camera overtake?
-                 // Let's stop player x.
                  if (player.dx > 0) {
                      player.x = p.x - player.width;
-                     // If pushed off screen by camera -> Game Over logic below
                  }
             }
         }
     }
 
-    // 2. Blocks Collision
+    // Blocks
     for (let i = blocks.length - 1; i >= 0; i--) {
         let b = blocks[i];
         if (!b.active) continue;
 
         if (checkCollision(player, b)) {
-            const prevY = player.y - player.dy;
+            const prevY = player.y - (player.dy * dt);
             
             if (prevY >= b.y + b.height) {
                 player.dy = 0;
@@ -342,11 +400,12 @@ function update() {
                     score += 10;
                 } else if (b.type === 'yellow') {
                     score += 20;
-                    coins.push({x: b.x, y: b.y, timer: 30});
+                    coins.push({x: b.x, y: b.y, text: "+50", timer: 30, color: 'gold'});
                     score += 50; 
                 } else if (b.type === 'blue') {
                     score += 30;
-                    spawnItem(b.x, b.y);
+                    const type = getRandomItemType();
+                    applyItemEffect(type);
                 }
                 updateDifficulty();
 
@@ -364,17 +423,15 @@ function update() {
         }
     }
 
-    // 3. Enemies Collision
+    // Enemies
     for (let i = enemies.length - 1; i >= 0; i--) {
         let e = enemies[i];
         
-        e.x += e.dx;
-        // Enemies patrol logic needs to account for moving world?
-        // They just move relative to their platform.
+        e.x += e.dx * dt; // Scaled movement
         if (e.x < e.patrolStart || e.x > e.patrolEnd) e.dx *= -1;
 
         if (checkCollision(player, e)) {
-            const prevY = player.y - player.dy;
+            const prevY = player.y - (player.dy * dt);
             if (player.dy > 0 && prevY + player.height <= e.y + e.height * 0.5) {
                 player.dy = -8; 
                 enemies.splice(i, 1);
@@ -389,7 +446,7 @@ function update() {
         }
     }
 
-    // 4. Hazards
+    // Hazards
     for (let h of hazards) {
         if (checkCollision(player, h)) {
             const shrink = 5;
@@ -403,16 +460,16 @@ function update() {
         }
     }
 
-    // 5. Items Logic
+    // Items
     for (let i = items.length - 1; i >= 0; i--) {
         let it = items[i];
-        it.dy += GRAVITY;
-        it.y += it.dy;
-        it.x += it.dx;
+        it.dy += GRAVITY * dt;
+        it.y += it.dy * dt;
+        it.x += it.dx * dt;
         
         for (let p of platforms) {
             if (checkCollision(it, p)) {
-                if (it.dy > 0 && it.y + it.height < p.y + it.dy + 5) {
+                if (it.dy > 0 && it.y + it.height < p.y + (it.dy*dt) + 5) {
                     it.y = p.y - it.height;
                     it.dy = 0;
                 }
@@ -425,13 +482,8 @@ function update() {
         }
     }
 
-    // Pit Death
     if (player.y > VIEWPORT_HEIGHT + 100) triggerGameOver();
-    
-    // Camera Overtake Death (if blocked by wall and camera moves past)
-    if (player.x < cameraX - 50) {
-        triggerGameOver();
-    }
+    if (player.x < cameraX - 50) triggerGameOver();
 
     // Auto-generate world
     const renderDistance = cameraX + VIEWPORT_WIDTH + 200;
@@ -445,6 +497,7 @@ function update() {
     blocks = blocks.filter(b => b.x + b.width > cleanupThreshold);
     hazards = hazards.filter(h => h.x + h.width > cleanupThreshold);
     items = items.filter(i => i.x + i.width > cleanupThreshold);
+    clouds = clouds.filter(c => c.x + c.width > cleanupThreshold);
 }
 
 // --- Drawing ---
@@ -455,6 +508,16 @@ function draw() {
 
     ctx.save();
     ctx.translate(-cameraX, 0);
+
+    // Clouds
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    for (let c of clouds) {
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.width/3, 0, Math.PI * 2);
+        ctx.arc(c.x + c.width/3, c.y - c.width/4, c.width/3, 0, Math.PI * 2);
+        ctx.arc(c.x + c.width/2, c.y, c.width/3, 0, Math.PI * 2);
+        ctx.fill();
+    }
 
     // Platforms
     ctx.fillStyle = '#654321'; 
@@ -498,10 +561,12 @@ function draw() {
         }
         
         if (e.type === 'larva') {
+            let scale = 1 + Math.sin(frameCount * 0.2 + e.animOffset) * 0.2; 
             ctx.fillStyle = '#7FFF00'; 
             for(let k=0; k<3; k++) {
+                let segX = e.x + 10 + k*10 * scale; 
                 ctx.beginPath();
-                ctx.arc(e.x + 10 + k*10, e.y + 10, 10, 0, Math.PI*2);
+                ctx.arc(segX, e.y + 10, 10, 0, Math.PI*2);
                 ctx.fill();
             }
         } else if (e.type === 'turtle') {
@@ -548,19 +613,16 @@ function draw() {
             grad.addColorStop(1, "violet");
             ctx.fillStyle = grad;
         }
-        
         ctx.beginPath();
         ctx.arc(it.x + it.width/2, it.y + it.height/2, it.width/2, 0, Math.PI*2);
         ctx.fill();
-        ctx.fillStyle = 'white';
-        ctx.beginPath(); ctx.arc(it.x + it.width/2, it.y + it.height/2, it.width/4, 0, Math.PI*2); ctx.fill();
     }
 
-    // Coins
+    // Text Effects
     for (let c of coins) {
-        ctx.fillStyle = 'gold';
+        ctx.fillStyle = c.color || 'gold';
         ctx.font = '20px Arial';
-        ctx.fillText('+50', c.x, c.y - (30 - c.timer));
+        ctx.fillText(c.text, c.x, c.y - (30 - c.timer));
         c.timer--;
     }
     coins = coins.filter(c => c.timer > 0);
@@ -602,21 +664,72 @@ function hideGameOverScreen() {
 
 const LEADERBOARD_KEY = 'kwmerio_scores';
 
+// Firestore Integration
 function saveScore() {
     const nameInput = document.getElementById('player-name');
     const name = nameInput.value.trim() || 'Anonymous';
+    
+    if (db) {
+        // Use Firestore
+        db.collection('scores').add({
+            name: name,
+            score: score,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        }).then(() => {
+            loadLeaderboard();
+        }).catch((error) => {
+            console.error("Error saving score:", error);
+            // Fallback to local
+            saveScoreLocal(name);
+        });
+    } else {
+        // Use Local
+        saveScoreLocal(name);
+    }
+    document.getElementById('save-score-btn').disabled = true;
+}
+
+function saveScoreLocal(name) {
     let scores = JSON.parse(localStorage.getItem(LEADERBOARD_KEY)) || [];
     scores.push({ name: name, score: score });
     scores.sort((a, b) => b.score - a.score);
     scores = scores.slice(0, 10);
     localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(scores));
     loadLeaderboard();
-    document.getElementById('save-score-btn').disabled = true;
 }
 
 function loadLeaderboard() {
-    let scores = JSON.parse(localStorage.getItem(LEADERBOARD_KEY)) || [];
     const list = document.getElementById('leaderboard-list');
+    list.innerHTML = 'Loading...';
+    
+    if (db) {
+        // Load from Firestore (Top 10)
+        db.collection('scores')
+            .orderBy('score', 'desc')
+            .limit(10)
+            .get()
+            .then((querySnapshot) => {
+                list.innerHTML = '';
+                let rank = 1;
+                querySnapshot.forEach((doc) => {
+                    const s = doc.data();
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span>#${rank++} ${s.name}</span> <span>${s.score}</span>`;
+                    list.appendChild(li);
+                });
+            })
+            .catch((error) => {
+                console.error("Error loading leaderboard:", error);
+                loadLeaderboardLocal();
+            });
+    } else {
+        loadLeaderboardLocal();
+    }
+}
+
+function loadLeaderboardLocal() {
+    const list = document.getElementById('leaderboard-list');
+    let scores = JSON.parse(localStorage.getItem(LEADERBOARD_KEY)) || [];
     list.innerHTML = '';
     scores.forEach((s, index) => {
         const li = document.createElement('li');
@@ -636,7 +749,6 @@ window.addEventListener('keyup', (e) => {
     if (e.code === 'ArrowUp' || e.code === 'Space') keys.up = false;
 });
 
-// Touch/Click Jump (Global)
 document.addEventListener('touchstart', (e) => {
     if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
         performJump();
@@ -648,18 +760,30 @@ document.addEventListener('mousedown', (e) => {
     }
 });
 
-
 document.getElementById('save-score-btn').addEventListener('click', saveScore);
 document.getElementById('restart-btn').addEventListener('click', () => {
     document.getElementById('save-score-btn').disabled = false;
     initGame();
 });
 
-function loop() {
-    update();
+// --- Game Loop with Delta Time ---
+let lastTime = 0;
+
+function loop(timestamp) {
+    if (!lastTime) lastTime = timestamp;
+    const deltaTime = timestamp - lastTime;
+    lastTime = timestamp;
+
+    // Scale dt to target FPS (60)
+    // If running at 60fps, deltaTime is 16.6ms. scale = 1.
+    // If running at 120fps, deltaTime is 8.3ms. scale = 0.5.
+    // If running at 30fps, deltaTime is 33.3ms. scale = 2.
+    const dt = deltaTime / (1000 / TARGET_FPS);
+
+    update(dt); // Update with scaled time
     draw();
     requestAnimationFrame(loop);
 }
 
 initGame();
-loop();
+requestAnimationFrame(loop);
