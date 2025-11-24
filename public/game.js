@@ -20,14 +20,37 @@ const BASE_PLAYER_HEIGHT = 45;
 const playerImage = new Image();
 playerImage.src = 'character.png';
 
-let assetsLoaded = false;
-playerImage.onload = () => {
-    assetsLoaded = true;
+const enemyImages = {
+    'turtle': new Image(),
+    'larva': new Image(),
+    'slime': new Image(),
+    'mouse': new Image(),
+    'shark': new Image()
 };
+enemyImages['turtle'].src = 'turtle.png';
+enemyImages['larva'].src = 'larva.png';
+enemyImages['slime'].src = 'slime.png';
+enemyImages['mouse'].src = 'mouse.png';
+enemyImages['shark'].src = 'shark.png';
+
+let assetsLoaded = false;
+let loadedCount = 0;
+const totalAssets = 1 + 5; // player + 5 enemies
+
+function checkAssetsLoaded() {
+    loadedCount++;
+    if (loadedCount >= totalAssets) {
+        assetsLoaded = true;
+    }
+}
+
+playerImage.onload = checkAssetsLoaded;
+Object.values(enemyImages).forEach(img => {
+    img.onload = checkAssetsLoaded;
+});
 
 // --- Supabase Setup ---
-const SUPABASE_URL = 'https://qqelpmjcursojhxsqrfm.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxZWxwbWpjdXJzb2poeHNxcmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5NDk2NDgsImV4cCI6MjA3OTUyNTY0OH0.sLHv9TDLpR-7B1gJiT5fnEtZ_PSwB9NEL77H2R6SXkI';
+// SUPABASE_URL and SUPABASE_ANON_KEY are defined in config.js
 
 let supabase = null;
 // Check for global supabase object from CDN
@@ -529,49 +552,39 @@ function draw() {
         ctx.save();
         // Move pivot to center of enemy
         ctx.translate(e.x + e.width/2, e.y + e.height/2);
-        if (e.dx > 0) { 
-            ctx.scale(-1, 1); // Flip
-        }
         
-        // Draw relative to center (-w/2, -h/2)
-        if (e.type === 'larva') {
-            let scale = 1 + Math.sin(frameCount * 0.2 + e.animOffset) * 0.2; 
-            ctx.fillStyle = '#7FFF00'; 
-            for(let k=0; k<3; k++) {
-                let segOffset = (k - 1) * 10 * scale; // Center segments
-                ctx.beginPath();
-                ctx.arc(segOffset, 0, 10, 0, Math.PI*2); // y=0 because translated to center
-                ctx.fill();
+        // Face direction
+        if (e.dx > 0) { 
+            ctx.scale(-1, 1); 
+        }
+
+        // Draw Image if loaded
+        if (assetsLoaded && enemyImages[e.type]) {
+            // Adjust scaling to fit the hitbox nicely
+            // Images are roughly square.
+            let img = enemyImages[e.type];
+            // Draw relative to center (-w/2, -h/2)
+            // e.width and e.height are the hitbox size.
+            // We want to draw the image covering the hitbox, maybe slightly larger for visuals
+            
+            // Custom scaling/offset per type if needed for visual flair
+            let drawW = e.width;
+            let drawH = e.height;
+            
+            if (e.type === 'larva') {
+                 // Larva squish animation
+                 let scale = 1 + Math.sin(frameCount * 0.2 + e.animOffset) * 0.1;
+                 drawW *= scale;
+                 drawH /= scale;
             }
-        } else if (e.type === 'turtle') {
-            ctx.fillStyle = 'green';
-            ctx.beginPath();
-            ctx.arc(0, 0, e.width/2, 0, Math.PI*2);
-            ctx.fill();
-            ctx.fillStyle = '#90EE90'; 
-            ctx.fillRect(-e.width/2 - 5, 0, 10, 10); // Head
-        } else if (e.type === 'slime') {
-            ctx.fillStyle = '#4169E1'; 
-            ctx.beginPath();
-            ctx.moveTo(-e.width/2, e.height/2); // Bottom left
-            ctx.quadraticCurveTo(0, -e.height/2 - 10, e.width/2, e.height/2); // Curve to top center then bottom right
-            ctx.fill();
-        } else if (e.type === 'mouse') {
-            ctx.fillStyle = 'gray';
-            ctx.fillRect(-e.width/2, -e.height/2 + 5, e.width, e.height-5);
-            ctx.fillStyle = 'pink'; 
-            ctx.beginPath(); ctx.arc(-e.width/2 + 5, -e.height/2 + 5, 5, 0, Math.PI*2); ctx.fill();
-        } else if (e.type === 'shark') {
-            ctx.fillStyle = 'darkblue';
-            ctx.beginPath();
-            ctx.moveTo(e.width/2, 0);
-            ctx.lineTo(-e.width/2, e.height/2);
-            ctx.lineTo(-e.width/2 + 20, -e.height/2); 
-            ctx.fill();
+
+            ctx.drawImage(img, -drawW/2, -drawH/2, drawW, drawH);
         } else {
+            // Fallback (should be rare if preloaded)
             ctx.fillStyle = 'magenta';
             ctx.fillRect(-e.width/2, -e.height/2, e.width, e.height);
         }
+        
         ctx.restore();
     }
 
