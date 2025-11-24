@@ -7,7 +7,7 @@ body {
     align-items: center;
     height: 100vh;
     font-family: 'Arial', sans-serif;
-    touch-action: none; /* Prevent browser zooming/scrolling */
+    touch-action: none; 
     overflow: hidden;
 }
 
@@ -20,7 +20,6 @@ body {
     overflow: hidden;
 }
 
-/* Make it fit on smaller screens */
 @media (max-width: 380px) {
     #game-container {
         width: 100%;
@@ -61,7 +60,7 @@ canvas {
     left: 10px;
     font-size: 20px;
     font-weight: bold;
-    color: #FFD700; /* Gold */
+    color: #FFD700; 
     text-shadow: 2px 2px 0 #000;
 }
 
@@ -131,52 +130,27 @@ canvas {
     border-bottom: 1px solid rgba(255,255,255,0.2);
 }
 
-/* Touch Controls */
+/* Updated Controls: Just a hint */
 #controls {
     position: absolute;
     bottom: 20px;
-    left: 0;
     width: 100%;
-    height: 80px;
-    display: flex;
-    justify-content: space-between;
-    padding: 0 20px;
-    box-sizing: border-box;
-    pointer-events: none; /* Let clicks pass through if needed, but buttons catch them */
+    text-align: center;
+    pointer-events: none;
 }
 
-#controls button {
-    pointer-events: auto;
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(255, 255, 255, 0.5);
-    color: #000;
-    font-size: 24px;
-    font-weight: bold;
-    backdrop-filter: blur(5px);
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+#tap-hint {
+    background: rgba(0,0,0,0.5);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 18px;
+    display: inline-block;
+    animation: fadePulse 2s infinite;
 }
 
-#controls button:active {
-    background: rgba(255, 255, 255, 0.8);
-    transform: scale(0.95);
-}
-
-#controls-left {
-    display: flex;
-    gap: 15px;
-}
-
-#controls-right {
-    display: flex;
-    align-items: center;
-}
-
-#btn-jump {
-    width: 80px !important;
-    height: 80px !important;
-    background: rgba(255, 200, 200, 0.6) !important;
-    font-size: 18px !important;
+@keyframes fadePulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 1; }
+    100% { opacity: 0.5; }
 }

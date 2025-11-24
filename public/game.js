@@ -11,7 +11,6 @@ const VIEWPORT_HEIGHT = canvas.height;
 // Entity Dimensions (Base)
 const BASE_PLAYER_WIDTH = 40;
 const BASE_PLAYER_HEIGHT = 45; 
-const TILE_SIZE = 40; 
 
 // --- Assets ---
 const playerImage = new Image();
@@ -42,8 +41,8 @@ let player = {
     sizeMultiplier: 1.0,
     speedMultiplier: 1.0,
     combo: 0,
-    canDoubleJump: false, // Ability unlocked by Rainbow Mushroom
-    jumpCount: 0 // Current jumps (0: ground, 1: first air, 2: double)
+    canDoubleJump: false, 
+    jumpCount: 0 
 };
 
 // World Entities
@@ -55,10 +54,8 @@ let items = [];
 let particles = []; 
 let coins = []; 
 
-// Inputs
+// Inputs (Only Jump now)
 const keys = {
-    right: false,
-    left: false,
     up: false
 };
 
@@ -120,6 +117,7 @@ function updateDifficulty() {
     
     if (newPhase > phase) {
         phase = newPhase;
+        // Speed increases by 10% per phase
         currentSpeed = BASE_SPEED * (1 + (phase - 1) * 0.1); 
         obstacleFreq = 0.1 + (phase - 1) * 0.1;
         pitFreq = 0.1 + (phase - 1) * 0.05;
@@ -129,7 +127,7 @@ function updateDifficulty() {
 function createChunk(startX) {
     let gap = 0;
     if (Math.random() < pitFreq && startX > 800) {
-        gap = 60 + Math.random() * 80; 
+        gap = 80 + Math.random() * 60; // Slightly larger gap for auto-run challenge
     }
 
     const width = 300 + Math.random() * 300; 
@@ -200,6 +198,7 @@ function spawnEnemy(px, py, pw) {
         width: w,
         height: h,
         type: type,
+        // Enemies move left towards player
         dx: -1.5 * (1 + (phase * 0.1)), 
         patrolStart: px,
         patrolEnd: px + pw
@@ -222,7 +221,7 @@ function spawnItem(x, y) {
     let type = 'yellow_mushroom';
     if (r < 0.25) type = 'blue_mushroom';
     else if (r < 0.5) type = 'red_mushroom';
-    else if (r < 0.75) type = 'rainbow_mushroom'; // New item
+    else if (r < 0.75) type = 'rainbow_mushroom'; 
 
     items.push({
         x: x,
@@ -259,7 +258,7 @@ function performJump() {
         player.grounded = false;
         player.jumpCount = 1;
     } else if (player.canDoubleJump && player.jumpCount < 2) {
-        player.dy = JUMP_FORCE; // Double jump
+        player.dy = JUMP_FORCE; 
         player.jumpCount = 2;
     }
 }
@@ -276,17 +275,10 @@ function update() {
 
     updateScoreUI();
 
+    // AUTO RUN: Always move right
     let speed = currentSpeed * player.speedMultiplier;
-    
-    if (keys.right) {
-        player.dx = speed;
-        player.facingRight = true;
-    } else if (keys.left) {
-        player.dx = -speed;
-        player.facingRight = false;
-    } else {
-        player.dx = 0;
-    }
+    player.dx = speed;
+    player.facingRight = true;
 
     // Gravity
     player.dy += GRAVITY;
@@ -295,11 +287,12 @@ function update() {
     player.x += player.dx;
     player.y += player.dy;
 
-    // Camera
-    if (player.x > cameraX + VIEWPORT_WIDTH * 0.4) {
-        cameraX = player.x - VIEWPORT_WIDTH * 0.4;
-    }
-    if (player.x < cameraX) player.x = cameraX; 
+    // Camera: Follow player with offset
+    // Player stays at 30% of screen width
+    cameraX = player.x - VIEWPORT_WIDTH * 0.3;
+    
+    // Death if falls behind? No, camera follows.
+    // Death if hits wall? Not possible in infinite runner usually.
 
     // Ground Check
     player.grounded = false;
@@ -314,14 +307,20 @@ function update() {
                     player.dy = 0;
                     player.y = p.y - player.height;
                     player.combo = 0; 
-                    player.jumpCount = 0; // Reset jump count
+                    player.jumpCount = 0; 
                 }
             } else if (prevY >= p.y + p.height) {
                 player.dy = 0;
                 player.y = p.y + p.height;
             } else {
-                 if (player.dx > 0) player.x = p.x - player.width;
-                 else if (player.dx < 0) player.x = p.x + p.width;
+                 // Side collision in Auto Run usually means death or stop
+                 // If we hit a wall, game over?
+                 // Or just stop and let camera overtake?
+                 // Let's stop player x.
+                 if (player.dx > 0) {
+                     player.x = p.x - player.width;
+                     // If pushed off screen by camera -> Game Over logic below
+                 }
             }
         }
     }
@@ -357,11 +356,10 @@ function update() {
                     player.dy = 0;
                     player.y = b.y - player.height;
                     player.combo = 0;
-                    player.jumpCount = 0; // Reset jump count on block
+                    player.jumpCount = 0; 
                 }
             } else {
                 if (player.dx > 0) player.x = b.x - player.width;
-                else if (player.dx < 0) player.x = b.x + b.width;
             }
         }
     }
@@ -371,6 +369,8 @@ function update() {
         let e = enemies[i];
         
         e.x += e.dx;
+        // Enemies patrol logic needs to account for moving world?
+        // They just move relative to their platform.
         if (e.x < e.patrolStart || e.x > e.patrolEnd) e.dx *= -1;
 
         if (checkCollision(player, e)) {
@@ -425,17 +425,14 @@ function update() {
         }
     }
 
+    // Pit Death
     if (player.y > VIEWPORT_HEIGHT + 100) triggerGameOver();
-
-    // Input Jump Logic (Called from loop, checks keys)
-    // We handle single "press" events in event listeners, but "holding" jump?
-    // User requested "One click or Touch to Jump".
-    // Jump needs to trigger ONCE per press, not continuous.
-    // So we move jump logic to the Event Listener, not update loop.
-    // EXCEPT variable jump height logic which requires holding.
-    // For simplicity, let's keep fixed jump force but allow double jump.
-    // See "performJump()" function.
     
+    // Camera Overtake Death (if blocked by wall and camera moves past)
+    if (player.x < cameraX - 50) {
+        triggerGameOver();
+    }
+
     // Auto-generate world
     const renderDistance = cameraX + VIEWPORT_WIDTH + 200;
     while (nextChunkX < renderDistance) {
@@ -542,7 +539,6 @@ function draw() {
         else if (it.type === 'blue_mushroom') ctx.fillStyle = 'blue';
         else if (it.type === 'red_mushroom') ctx.fillStyle = 'red';
         else if (it.type === 'rainbow_mushroom') {
-             // Rainbow gradient
             let grad = ctx.createLinearGradient(it.x, it.y, it.x+it.width, it.y+it.height);
             grad.addColorStop(0, "red");
             grad.addColorStop(0.2, "orange");
@@ -630,25 +626,18 @@ function loadLeaderboard() {
 }
 
 // Input Handlers
-// Key Jump
 window.addEventListener('keydown', (e) => {
-    if (e.code === 'ArrowRight') keys.right = true;
-    if (e.code === 'ArrowLeft') keys.left = true;
     if (e.code === 'ArrowUp' || e.code === 'Space') {
         keys.up = true;
-        performJump(); // Trigger jump on press
+        performJump(); 
     }
 });
 window.addEventListener('keyup', (e) => {
-    if (e.code === 'ArrowRight') keys.right = false;
-    if (e.code === 'ArrowLeft') keys.left = false;
     if (e.code === 'ArrowUp' || e.code === 'Space') keys.up = false;
 });
 
 // Touch/Click Jump (Global)
-// "One click or screen touch"
 document.addEventListener('touchstart', (e) => {
-    // If touching specific buttons, don't trigger global jump (already handled by button listeners)
     if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
         performJump();
     }
@@ -658,27 +647,6 @@ document.addEventListener('mousedown', (e) => {
         performJump();
     }
 });
-
-
-// UI Controls (Buttons)
-const btnLeft = document.getElementById('btn-left');
-const btnRight = document.getElementById('btn-right');
-const btnJump = document.getElementById('btn-jump');
-
-// Movement buttons are continuous
-btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); keys.left = true; });
-btnLeft.addEventListener('touchend', (e) => { e.preventDefault(); keys.left = false; });
-btnLeft.addEventListener('mousedown', (e) => { e.preventDefault(); keys.left = true; });
-btnLeft.addEventListener('mouseup', (e) => { e.preventDefault(); keys.left = false; });
-
-btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); keys.right = true; });
-btnRight.addEventListener('touchend', (e) => { e.preventDefault(); keys.right = false; });
-btnRight.addEventListener('mousedown', (e) => { e.preventDefault(); keys.right = true; });
-btnRight.addEventListener('mouseup', (e) => { e.preventDefault(); keys.right = false; });
-
-// Jump button is instant
-btnJump.addEventListener('touchstart', (e) => { e.preventDefault(); performJump(); });
-btnJump.addEventListener('mousedown', (e) => { e.preventDefault(); performJump(); });
 
 
 document.getElementById('save-score-btn').addEventListener('click', saveScore);
